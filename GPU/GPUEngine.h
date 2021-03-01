@@ -31,6 +31,7 @@ static const char *searchModes[] = {"Compressed","Uncompressed","Compressed or U
 #define STEP_SIZE 1024
 
 // Number of thread per block
+#define NB_TRHEAD_PER_GROUP 512
 #define ITEM_SIZE 28
 #define ITEM_SIZE32 (ITEM_SIZE/4)
 #define _64K 65536
@@ -56,7 +57,7 @@ class GPUEngine {
 
 public:
 
-  GPUEngine(int nbThreadGroup,int nbThreadPerGroup,int gpuId,uint32_t maxFound,bool rekey);
+  GPUEngine(int nbThreadGroup,int gpuId,uint32_t maxFound,bool rekey); 
   ~GPUEngine();
   void SetPrefix(std::vector<prefix_t> prefixes);
   void SetPrefix(std::vector<LPREFIX> prefixes,uint32_t totalPrefix);
@@ -82,7 +83,6 @@ private:
   bool CheckHash(uint8_t *h, std::vector<ITEM>& found, int tid, int incr, int endo, int *ok);
 
   int nbThread;
-  int nbThreadPerGroup;
   prefix_t *inputPrefix;
   prefix_t *inputPrefixPinned;
   uint32_t *inputPrefixLookUp;

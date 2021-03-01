@@ -41,7 +41,7 @@
 __global__ void comp_keys(uint32_t mode,prefix_t *prefix, uint32_t *lookup32, uint64_t *keys, uint32_t maxFound, uint32_t *found) {
 
   int xPtr = (blockIdx.x*blockDim.x) * 8;
-  int yPtr = xPtr + 4 * blockDim.x;
+  int yPtr = xPtr + 4 * NB_TRHEAD_PER_GROUP;
   ComputeKeys(mode, keys + xPtr, keys + yPtr, prefix, lookup32, maxFound, found);
 
 }
@@ -49,7 +49,7 @@ __global__ void comp_keys(uint32_t mode,prefix_t *prefix, uint32_t *lookup32, ui
 __global__ void comp_keys_p2sh(uint32_t mode, prefix_t *prefix, uint32_t *lookup32, uint64_t *keys, uint32_t maxFound, uint32_t *found) {
 
   int xPtr = (blockIdx.x*blockDim.x) * 8;
-  int yPtr = xPtr + 4 * blockDim.x;
+  int yPtr = xPtr + 4 * NB_TRHEAD_PER_GROUP;
   ComputeKeysP2SH(mode, keys + xPtr, keys + yPtr, prefix, lookup32, maxFound, found);
 
 }
@@ -57,7 +57,7 @@ __global__ void comp_keys_p2sh(uint32_t mode, prefix_t *prefix, uint32_t *lookup
 __global__ void comp_keys_comp(prefix_t *prefix, uint32_t *lookup32, uint64_t *keys, uint32_t maxFound, uint32_t *found) {
 
   int xPtr = (blockIdx.x*blockDim.x) * 8;
-  int yPtr = xPtr + 4 * blockDim.x;
+  int yPtr = xPtr + 4 * NB_TRHEAD_PER_GROUP;
   ComputeKeysComp(keys + xPtr, keys + yPtr, prefix, lookup32, maxFound, found);
 
 }
@@ -65,7 +65,7 @@ __global__ void comp_keys_comp(prefix_t *prefix, uint32_t *lookup32, uint64_t *k
 __global__ void comp_keys_pattern(uint32_t mode, prefix_t *pattern, uint64_t *keys,  uint32_t maxFound, uint32_t *found) {
 
   int xPtr = (blockIdx.x*blockDim.x) * 8;
-  int yPtr = xPtr + 4 * blockDim.x;
+  int yPtr = xPtr + 4 * NB_TRHEAD_PER_GROUP;
   ComputeKeys(mode, keys + xPtr, keys + yPtr, NULL, (uint32_t *)pattern, maxFound, found);
 
 }
@@ -73,7 +73,7 @@ __global__ void comp_keys_pattern(uint32_t mode, prefix_t *pattern, uint64_t *ke
 __global__ void comp_keys_p2sh_pattern(uint32_t mode, prefix_t *pattern, uint64_t *keys, uint32_t maxFound, uint32_t *found) {
 
   int xPtr = (blockIdx.x*blockDim.x) * 8;
-  int yPtr = xPtr + 4 * blockDim.x;
+  int yPtr = xPtr + 4 * NB_TRHEAD_PER_GROUP;
   ComputeKeysP2SH(mode, keys + xPtr, keys + yPtr, NULL, (uint32_t *)pattern, maxFound, found);
 
 }
@@ -154,8 +154,6 @@ int _ConvertSMVer2Cores(int major, int minor) {
       {0x70,  64},
       {0x72,  64},
       {0x75,  64},
-      {0x80,  64},
-      {0x86, 128},
       {-1, -1} };
 
   int index = 0;
@@ -172,11 +170,10 @@ int _ConvertSMVer2Cores(int major, int minor) {
 
 }
 
-GPUEngine::GPUEngine(int nbThreadGroup, int nbThreadPerGroup, int gpuId, uint32_t maxFound,bool rekey) {
+GPUEngine::GPUEngine(int nbThreadGroup, int gpuId, uint32_t maxFound,bool rekey) {
 
   // Initialise CUDA
   this->rekey = rekey;
-  this->nbThreadPerGroup = nbThreadPerGroup;
   initialised = false;
   cudaError_t err;
 
@@ -184,7 +181,7 @@ GPUEngine::GPUEngine(int nbThreadGroup, int nbThreadPerGroup, int gpuId, uint32_
   cudaError_t error_id = cudaGetDeviceCount(&deviceCount);
 
   if (error_id != cudaSuccess) {
-    printf("GPUEngine: CudaGetDeviceCount %s %d\n", cudaGetErrorString(error_id),error_id);
+    printf("GPUEngine: CudaGetDeviceCount %s\n", cudaGetErrorString(error_id));
     return;
   }
 
@@ -206,7 +203,7 @@ GPUEngine::GPUEngine(int nbThreadGroup, int nbThreadPerGroup, int gpuId, uint32_
   if (nbThreadGroup == -1)
     nbThreadGroup = deviceProp.multiProcessorCount * 8;
 
-  this->nbThread = nbThreadGroup * nbThreadPerGroup;
+  this->nbThread = nbThreadGroup * NB_TRHEAD_PER_GROUP;
   this->maxFound = maxFound;
   this->outputSize = (maxFound*ITEM_SIZE + 4);
 
@@ -214,8 +211,8 @@ GPUEngine::GPUEngine(int nbThreadGroup, int nbThreadPerGroup, int gpuId, uint32_
   sprintf(tmp,"GPU #%d %s (%dx%d cores) Grid(%dx%d)",
   gpuId,deviceProp.name,deviceProp.multiProcessorCount,
   _ConvertSMVer2Cores(deviceProp.major, deviceProp.minor),
-                      nbThread / nbThreadPerGroup,
-                      nbThreadPerGroup);
+  nbThread / NB_TRHEAD_PER_GROUP,
+  NB_TRHEAD_PER_GROUP);
   deviceName = std::string(tmp);
 
   // Prefer L1 (We do not use __shared__ at all)
@@ -462,10 +459,10 @@ bool GPUEngine::callKernel() {
   if (searchType == P2SH) {
 
     if (hasPattern) {
-      comp_keys_p2sh_pattern << < nbThread / nbThreadPerGroup, nbThreadPerGroup >> >
+      comp_keys_p2sh_pattern << < nbThread / NB_TRHEAD_PER_GROUP, NB_TRHEAD_PER_GROUP >> >
         (searchMode, inputPrefix, inputKey, maxFound, outputPrefix);
     } else {
-      comp_keys_p2sh << < nbThread / nbThreadPerGroup, nbThreadPerGroup >> >
+      comp_keys_p2sh << < nbThread / NB_TRHEAD_PER_GROUP, NB_TRHEAD_PER_GROUP >> >
         (searchMode, inputPrefix, inputPrefixLookUp, inputKey, maxFound, outputPrefix);
     }
 
@@ -478,14 +475,15 @@ bool GPUEngine::callKernel() {
         printf("GPUEngine: (TODO) BECH32 not yet supported with wildard\n");
         return false;
       }
-      comp_keys_pattern << < nbThread / nbThreadPerGroup, nbThreadPerGroup >> >
+      comp_keys_pattern << < nbThread / NB_TRHEAD_PER_GROUP, NB_TRHEAD_PER_GROUP >> >
         (searchMode, inputPrefix, inputKey, maxFound, outputPrefix);
     } else {
-      if (searchMode == SEARCH_COMPRESSED) {
-        comp_keys_comp << < nbThread / nbThreadPerGroup, nbThreadPerGroup >> >
+      //if (searchMode == SEARCH_COMPRESSED) {
+    if (0) {
+        comp_keys_comp << < nbThread / NB_TRHEAD_PER_GROUP, NB_TRHEAD_PER_GROUP >> >
           (inputPrefix, inputPrefixLookUp, inputKey, maxFound, outputPrefix);
       } else {
-        comp_keys << < nbThread / nbThreadPerGroup, nbThreadPerGroup >> >
+        comp_keys << < nbThread / NB_TRHEAD_PER_GROUP, NB_TRHEAD_PER_GROUP >> >
           (searchMode, inputPrefix, inputPrefixLookUp, inputKey, maxFound, outputPrefix);
       }
     }
@@ -505,18 +503,18 @@ bool GPUEngine::SetKeys(Point *p) {
 
   // Sets the starting keys for each thread
   // p must contains nbThread public keys
-  for (int i = 0; i < nbThread; i+= nbThreadPerGroup) {
-    for (int j = 0; j < nbThreadPerGroup; j++) {
+  for (int i = 0; i < nbThread; i+= NB_TRHEAD_PER_GROUP) {
+    for (int j = 0; j < NB_TRHEAD_PER_GROUP; j++) {
 
-      inputKeyPinned[8*i + j + 0* nbThreadPerGroup] = p[i + j].x.bits64[0];
-      inputKeyPinned[8*i + j + 1* nbThreadPerGroup] = p[i + j].x.bits64[1];
-      inputKeyPinned[8*i + j + 2* nbThreadPerGroup] = p[i + j].x.bits64[2];
-      inputKeyPinned[8*i + j + 3* nbThreadPerGroup] = p[i + j].x.bits64[3];
+      inputKeyPinned[8*i + j + 0*NB_TRHEAD_PER_GROUP] = p[i + j].x.bits64[0];
+      inputKeyPinned[8*i + j + 1*NB_TRHEAD_PER_GROUP] = p[i + j].x.bits64[1];
+      inputKeyPinned[8*i + j + 2*NB_TRHEAD_PER_GROUP] = p[i + j].x.bits64[2];
+      inputKeyPinned[8*i + j + 3*NB_TRHEAD_PER_GROUP] = p[i + j].x.bits64[3];
 
-      inputKeyPinned[8*i + j + 4* nbThreadPerGroup] = p[i + j].y.bits64[0];
-      inputKeyPinned[8*i + j + 5* nbThreadPerGroup] = p[i + j].y.bits64[1];
-      inputKeyPinned[8*i + j + 6* nbThreadPerGroup] = p[i + j].y.bits64[2];
-      inputKeyPinned[8*i + j + 7* nbThreadPerGroup] = p[i + j].y.bits64[3];
+      inputKeyPinned[8*i + j + 4*NB_TRHEAD_PER_GROUP] = p[i + j].y.bits64[0];
+      inputKeyPinned[8*i + j + 5*NB_TRHEAD_PER_GROUP] = p[i + j].y.bits64[1];
+      inputKeyPinned[8*i + j + 6*NB_TRHEAD_PER_GROUP] = p[i + j].y.bits64[2];
+      inputKeyPinned[8*i + j + 7*NB_TRHEAD_PER_GROUP] = p[i + j].y.bits64[3];
 
     }
   }
@@ -555,11 +553,14 @@ bool GPUEngine::Launch(std::vector<ITEM> &prefixFound,bool spinWait) {
     // Use cudaMemcpyAsync to avoid default spin wait of cudaMemcpy wich takes 100% CPU
     cudaEvent_t evt;
     cudaEventCreate(&evt);
-    cudaMemcpyAsync(outputPrefixPinned, outputPrefix, 4, cudaMemcpyDeviceToHost, 0);
-    cudaEventRecord(evt, 0);
+
+  //cudaMemcpy(outputPrefixPinned, outputPrefix, 4, cudaMemcpyDeviceToHost);
+  cudaMemcpyAsync(outputPrefixPinned, outputPrefix, 4, cudaMemcpyDeviceToHost, 0);
+
+  cudaEventRecord(evt, 0);
     while (cudaEventQuery(evt) == cudaErrorNotReady) {
       // Sleep 1 ms to free the CPU
-      Timer::SleepMillis(1);
+      //Timer::SleepMillis(1);
     }
     cudaEventDestroy(evt);
 
@@ -581,10 +582,10 @@ bool GPUEngine::Launch(std::vector<ITEM> &prefixFound,bool spinWait) {
     }
     nbFound = maxFound;
   }
-
+  
   // When can perform a standard copy, the kernel is eneded
   cudaMemcpy( outputPrefixPinned , outputPrefix , nbFound*ITEM_SIZE + 4 , cudaMemcpyDeviceToHost);
-
+  
   for (uint32_t i = 0; i < nbFound; i++) {
     uint32_t *itemPtr = outputPrefixPinned + (i*ITEM_SIZE32 + 1);
     ITEM it;
@@ -620,6 +621,10 @@ bool GPUEngine::CheckHash(uint8_t *h, vector<ITEM>& found,int tid,int incr,int e
     ok = false;
     printf("Expected item not found %s (thread=%d, incr=%d, endo=%d)\n",
       toHex(h, 20).c_str(),tid,incr,endo);
+  if (found[l].hash != NULL)
+    printf("%s\n", toHex(found[l].hash, 20).c_str());
+  else
+    printf("NULL\n");
   }
 
   return ok;
@@ -703,7 +708,7 @@ bool GPUEngine::Check(Secp256K1 *secp) {
 
   Point *p = new Point[nbThread];
   Point *p2 = new Point[nbThread];
-  Int k;
+  Int k;  
 
   // Check kernel
   int nbFoundCPU[6];
@@ -739,55 +744,57 @@ bool GPUEngine::Check(Secp256K1 *secp) {
   double t0 = Timer::get_tick();
   Launch(found,true);
   double t1 = Timer::get_tick();
-  Timer::printResult((char *)"Key", 6*STEP_SIZE*nbThread, t0, t1);
-
+  //Timer::printResult((char *)"Key", 6*STEP_SIZE*nbThread, t0, t1);
+  Timer::printResult((char *)"Key", 1*STEP_SIZE*nbThread, t0, t1);
+   
   //for (int i = 0; i < found.size(); i++) {
   //  printf("[%d]: thId=%d incr=%d\n", i, found[i].thId,found[i].incr);
   //  printf("[%d]: %s\n", i,toHex(found[i].hash,20).c_str());
   //}
-
+  
   printf("ComputeKeys() found %d items , CPU check...\n",(int)found.size());
 
-  Int beta,beta2;
-  beta.SetBase16((char *)"7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
-  beta2.SetBase16((char *)"851695d49a83f8ef919bb86153cbcb16630fb68aed0a766a3ec693d68e6afa40");
+  //Int beta,beta2;
+  //beta.SetBase16((char *)"7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
+  //beta2.SetBase16((char *)"851695d49a83f8ef919bb86153cbcb16630fb68aed0a766a3ec693d68e6afa40");
 
   // Check with CPU
   for (j = 0; (j<nbThread); j++) {
     for (i = 0; i < STEP_SIZE; i++) {
-
-      Point pt,p1,p2;
+      
+    Point pt;//, pt1, pt2;
       pt = p[j];
-      p1 = p[j];
-      p2 = p[j];
-      p1.x.ModMulK1(&beta);
-      p2.x.ModMulK1(&beta2);
+      //pt1 = p[j];
+      //pt2 = p[j];
+      //pt1.x.ModMulK1(&beta);
+      //pt2.x.ModMulK1(&beta2);
       p[j] = secp->NextKey(p[j]);
 
       // Point and endo
       secp->GetHash160(P2PKH, searchComp, pt, h);
       prefix_t pr = *(prefix_t *)h;
       if (pr == 0xFEFE || pr == 0x1234) {
-	      nbFoundCPU[0]++;
+        nbFoundCPU[0]++;
         ok &= CheckHash(h,found, j, i, 0, nbOK + 0);
       }
-      secp->GetHash160(P2PKH, searchComp, p1, h);
+    /*
+      secp->GetHash160(P2PKH, searchComp, pt1, h);
       pr = *(prefix_t *)h;
       if (pr == 0xFEFE || pr == 0x1234) {
         nbFoundCPU[1]++;
         ok &= CheckHash(h, found, j, i, 1, nbOK + 1);
       }
-      secp->GetHash160(P2PKH, searchComp, p2, h);
+      secp->GetHash160(P2PKH, searchComp, pt2, h);
       pr = *(prefix_t *)h;
       if (pr == 0xFEFE || pr == 0x1234) {
         nbFoundCPU[2]++;
         ok &= CheckHash(h, found, j, i, 2, nbOK + 2);
       }
-
+    
       // Symetrics
       pt.y.ModNeg();
-      p1.y.ModNeg();
-      p2.y.ModNeg();
+      pt1.y.ModNeg();
+      pt2.y.ModNeg();
 
       secp->GetHash160(P2PKH, searchComp, pt, h);
       pr = *(prefix_t *)h;
@@ -795,18 +802,20 @@ bool GPUEngine::Check(Secp256K1 *secp) {
         nbFoundCPU[3]++;
         ok &= CheckHash(h, found, j, -i, 0, nbOK + 3);
       }
-      secp->GetHash160(P2PKH, searchComp, p1, h);
+    
+      secp->GetHash160(P2PKH, searchComp, pt1, h);
       pr = *(prefix_t *)h;
       if (pr == 0xFEFE || pr == 0x1234) {
         nbFoundCPU[4]++;
         ok &= CheckHash(h, found, j, -i, 1, nbOK + 4);
       }
-      secp->GetHash160(P2PKH, searchComp, p2, h);
+      secp->GetHash160(P2PKH, searchComp, pt2, h);
       pr = *(prefix_t *)h;
       if (pr == 0xFEFE || pr == 0x1234) {
         nbFoundCPU[5]++;
         ok &= CheckHash(h, found, j, -i, 2, nbOK + 5);
       }
+    */
 
     }
   }
@@ -818,18 +827,19 @@ bool GPUEngine::Check(Secp256K1 *secp) {
 
   if( !ok ) {
 
-    int nbF = nbFoundCPU[0] + nbFoundCPU[1] + nbFoundCPU[2] +
-              nbFoundCPU[3] + nbFoundCPU[4] + nbFoundCPU[5];
-    printf("CPU found %d items\n",nbF);
+  int nbF = nbFoundCPU[0] + nbFoundCPU[1] + nbFoundCPU[2] +
+             nbFoundCPU[3] + nbFoundCPU[4] + nbFoundCPU[5];
+    printf("CPU found %d items\n",nbF); 
 
     printf("GPU: point   correct [%d/%d]\n", nbOK[0] , nbFoundCPU[0]);
+  /*
     printf("GPU: endo #1 correct [%d/%d]\n", nbOK[1] , nbFoundCPU[1]);
     printf("GPU: endo #2 correct [%d/%d]\n", nbOK[2] , nbFoundCPU[2]);
 
     printf("GPU: sym/point   correct [%d/%d]\n", nbOK[3] , nbFoundCPU[3]);
     printf("GPU: sym/endo #1 correct [%d/%d]\n", nbOK[4] , nbFoundCPU[4]);
     printf("GPU: sym/endo #2 correct [%d/%d]\n", nbOK[5] , nbFoundCPU[5]);
-
+  */
     printf("GPU/CPU check Failed !\n");
 
   }
@@ -837,6 +847,7 @@ bool GPUEngine::Check(Secp256K1 *secp) {
   if(ok) printf("GPU/CPU check OK\n");
 
   delete[] p;
+  delete[] p2;
   return ok;
 
 }
