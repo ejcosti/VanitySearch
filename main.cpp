@@ -22,6 +22,9 @@
 #include <string>
 #include <string.h>
 #include <stdexcept>
+#include <iostream>
+#include <sstream>
+#include <vector>
 #include "hash/sha512.h"
 #include "hash/sha256.h"
 
@@ -125,71 +128,94 @@ void getInts(string name,vector<int> &tokens, const string &text, char sep) {
 
 }
 
+
+vector<string> split (const string &s, char delim) {
+    vector<string> result;
+    stringstream ss (s);
+    string item;
+
+    while (getline (ss, item, delim)) {
+        result.push_back (item);
+    }
+
+    return result;
+}
+
+std::vector<char> HexToBytes(const std::string& hex) {
+  std::vector<char> bytes;
+
+  for (unsigned int i = 0; i < hex.length(); i += 2) {
+    std::string byteString = hex.substr(i, 2);
+    char byte = (char) strtol(byteString.c_str(), NULL, 16);
+    bytes.push_back(byte);
+  }
+
+  return bytes;
+}
+
 // ------------------------------------------------------------------------------------------
 
 void getKeySpace( const string &text, BITCRACK_PARAM * bc, Int& maxKey) {
 
-  size_t start = 0, end = 0;
-  string item;
+  printf("starting\n");
+  string start, end;
+
+  vector<string> keyspace = split(text, ':');
+
+
+  printf("parsed keyspace\n");
+  start = keyspace[0];
+  end = keyspace[1];
+
+  printf("formatting key space ranges\n");
+  start.insert(0, 64-start.length(), '0');
+  end.insert(0, 64-end.length(), '0');
+
+ 
+  //end = pre + end;
+
+  printf("start: %s\n", start.c_str());
+  printf("end: %s\n", end.c_str());
+
+  //printf("Hex: %s\n", HexToBytes(start.c_str()).c_str());
+
+  //char const *c_start = start.c_str();
+  //char const *c_end = start.c_str();
 
   try {
 
-    if((end = text.find(':', start)) != string::npos) {
-      item = std::string(text.substr(start, end));
-      start = end + 1;
-    }
-    else {
-      item = std::string(text);
-    }
-
-    if (item.length() == 0) {
+    if (start.size() == 0) {
+      printf("Set start to 1");
       bc->ksStart.SetInt32(1);
     }
-    else if (item.length() > 64) {
-      printf("[ERROR] keyspaceSTART: invalid privkey (64 length)\n");
+    else if (start.size() > 64) {
+      printf("[ERROR] keyspace START: invalid privkey (64 length)\n");
       exit(-1);
     }
     else{
-      item.insert(0, 64-item.length(), '0');
-      for (int i = 0; i < 32; i++) {
-        unsigned char my1ch = 0;
-        sscanf(&item[2 * i], "%02X", &my1ch);
-        bc->ksStart.SetByte(31 - i, my1ch);
-      }
+      std::string pre = "%02X";
+      start = pre + start;
+      //.SetBase16("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364140")
+      //bc->ksStart.SetBase16(HexToBytes(start.c_str()).data());
+      bc->ksStart.SetBase16(strdup(start.c_str()));
     }
-    //printf("[keyspaceSTART] 0x%064s \n", bc->ksStart.GetBase16().c_str());
+    //printf("[keyspace START] 0x%064s \n", bc->ksStart.GetBase16().c_str());
 
-    if (start != 0 && (end = text.find('+', start)) != string::npos) {
-      item = std::string(text.substr(end + 1));
-      if (item.length() > 64 || item.length() == 0) {
-        printf("[ERROR] keyspace__END: invalid privkey (64 length)\n");
-        exit(-1);
-      }
-      item.insert(0, 64 - item.length(), '0');
-      for (int i = 0; i < 32; i++) {
-        unsigned char my1ch = 0;
-        sscanf(&item[2 * i], "%02X", &my1ch);
-        bc->ksFinish.SetByte(31 - i, my1ch);
-      }
-      bc->ksFinish.Add(&bc->ksStart);
-    }
-    else if (start != 0) {
-      item = std::string(text.substr(start));
-      if (item.length() > 64 || item.length() == 0) {
-        printf("[ERROR] keyspace__END: invalid privkey (64 length)\n");
-        exit(-1);
-      }
-      item.insert(0, 64 - item.length(), '0');
-      for (int i = 0; i < 32; i++) {
-        unsigned char my1ch = 0;
-        sscanf(&item[2 * i], "%02X", &my1ch);
-        bc->ksFinish.SetByte(31 - i, my1ch);
-      }
-    }
-    else {
+
+    if (end.size() == 0) {
       bc->ksFinish.Set(&maxKey);
     }
-    //printf("[keyspace__END] 0x%064s \n", bc->ksFinish.GetBase16().c_str());
+    else if (end.size() > 64) {
+      printf("[ERROR] keyspace END: invalid privkey (64 length)\n");
+      exit(-1);
+    }
+    else{
+      std::string pre = "%02X";
+      end = pre + end;
+      //bc->ksFinish.SetBase16(HexToBytes(end.c_str()).data());
+      bc->ksFinish.SetBase16(strdup(end.c_str()));
+    }
+    //printf("[keyspace END] 0x%064s \n", bc->ksFinish.GetBase16().c_str());
 
   }
   catch (std::invalid_argument &) {
@@ -204,97 +230,100 @@ void getKeySpace( const string &text, BITCRACK_PARAM * bc, Int& maxKey) {
 
 void checkKeySpace(BITCRACK_PARAM * bc, Int& maxKey) {
 
-  if (bc->ksStart.IsGreater(&maxKey) || bc->ksFinish.IsGreater(&maxKey)) {
-    printf("[ERROR] START/END IsGreater %064s \n", maxKey.GetBase16().c_str());
-    exit(-1);
-  }
-  if (bc->ksFinish.IsLowerOrEqual(&bc->ksStart)) {
-    printf("[ERROR] END IsLowerOrEqual START \n");
-    exit(-1);
-  }
-  if (bc->ksFinish.IsLowerOrEqual(&bc->ksNext)) {
-    printf("[ERROR] END: IsLowerOrEqual NEXT \n");
-    exit(-1);
-  }
+  printf("check KeySpace");
+	if (bc->ksStart.IsGreater(&maxKey) || bc->ksFinish.IsGreater(&maxKey)) {
+		printf("[ERROR] START/END IsGreater %s \n", maxKey.GetBase16().c_str());
+		exit(-1);
+	}
+	if (bc->ksFinish.IsLowerOrEqual(&bc->ksStart)) {
+    printf("ksStart:  %s\n", bc->ksStart.GetBase16().c_str());
+		printf("[ERROR] END IsLowerOrEqual START \n");
+		exit(-1);
+	}
+	if (bc->ksFinish.IsLowerOrEqual(&bc->ksNext)) {
+		printf("[ERROR] END: IsLowerOrEqual NEXT \n");
+		exit(-1);
+	}
 
-  return;
+	return;
 }
 // ------------------------------------------------------------------------------------------
 
 void getShare(const string &text, int *shareM, int *shareN) {
 
-  size_t start = 0, end = 0;
-  string item;
+	size_t start = 0, end = 0;
+	string item;
 
-  try {
+	try {
 
-    if ((end = text.find('/', start)) != string::npos) {
-      *shareM = std::stoi(text.substr(start, end));
-      start = end + 1;
-      *shareN = std::stoi(text.substr(start));
-    }
-    else {
-      printf("[ERROR] Invalid --share M/N argument \n");
-      exit(-1);
-    }
-    if(*shareM <= 0 || *shareN <= 0 || *shareM > *shareN ) {
-      printf("[ERROR] Invalid --share argument, need M<=N and M>0 and N>0 \n");
-      exit(-1);
-    }
-    //printf("[share#M/N] %i/%i \n", *shareM, *shareN);
+		if ((end = text.find('/', start)) != string::npos) {
+			*shareM = std::stoi(text.substr(start, end));
+			start = end + 1;
+			*shareN = std::stoi(text.substr(start));
+		}
+		else {
+			printf("[ERROR] Invalid --share M/N argument \n");
+			exit(-1);
+		}
+		if(*shareM <= 0 || *shareN <= 0 || *shareM > *shareN ) {
+			printf("[ERROR] Invalid --share argument, need M<=N and M>0 and N>0 \n");
+			exit(-1);
+		}
+		//printf("[share#M/N] %i/%i \n", *shareM, *shareN);
 
-  }
-  catch (std::invalid_argument &) {
+	}
+	catch (std::invalid_argument &) {
 
-    printf("[ERROR] Invalid --share argument \n");
-    exit(-1);
+		printf("[ERROR] Invalid --share argument \n");
+		exit(-1);
 
-  }
+	}
 
 }
 // ------------------------------------------------------------------------------------------
 
 void loadProgress(string fileName, BITCRACK_PARAM * bc) {
 
-  if (fileName.length() > 0) {
+  printf("loadProgress\n");
+	if (fileName.length() > 0) {
 
-    FILE *fp;
-    fp = fopen(fileName.c_str(), "r");
-    if (fp != NULL) {
-      printf("[load] from sessfile '%s' \n", fileName.c_str());
+		FILE *fp;
+		fp = fopen(fileName.c_str(), "r");
+		if (fp != NULL) {
+			printf("[load] from sessfile '%s' \n", fileName.c_str());
 
-      char f_buf[100];
-      string f_str;
-      size_t f_start = 0, f_end = 0;
+			char f_buf[100];
+			string f_str;
+			size_t f_start = 0, f_end = 0;
 
-      while (!feof(fp)) {
-        if (fgets(f_buf, 99, fp)) {
-          //printf("%s", f_buf);
-          f_str = f_buf;
-          //printf("%s", f_str.c_str());
-          if ((f_end = f_str.find("start=", f_start)) != string::npos) {
-            f_str = std::string(f_str.substr(f_end + 6, 64));
-            //printf("[load][start=%s]\n", f_str.c_str());
-            bc->ksStart.SetBase16((char *)f_str.c_str());
-          }
-          if ((f_end = f_str.find("next=", f_start)) != string::npos) {
-            f_str = std::string(f_str.substr(f_end + 5, 64));
-            //printf("[load][next_=%s]\n", f_str.c_str());
-            bc->ksNext.SetBase16((char *)f_str.c_str());
-          }
-          if ((f_end = f_str.find("end=", f_start)) != string::npos) {
-            f_str = std::string(f_str.substr(f_end + 4, 64));
-            //printf("[load][end__=%s]\n", f_str.c_str());
-            bc->ksFinish.SetBase16((char *)f_str.c_str());
-          }
-        }
-      }
-      printf("[load] start=%064s \n", bc->ksStart.GetBase16().c_str());
-      printf("[load]  next=%064s \n", bc->ksNext.GetBase16().c_str());
-      printf("[load]   end=%064s \n", bc->ksFinish.GetBase16().c_str());
-      fclose(fp);
-    }
-  }
+			while (!feof(fp)) {
+				if (fgets(f_buf, 99, fp)) {
+					//printf("%s", f_buf);
+					f_str = f_buf;
+					//printf("%s", f_str.c_str());
+					if ((f_end = f_str.find("start=", f_start)) != string::npos) {
+						f_str = std::string(f_str.substr(f_end + 6, 64));
+						//printf("[load][start=%s]\n", f_str.c_str());
+						bc->ksStart.SetBase16((char *)f_str.c_str());
+					}
+					if ((f_end = f_str.find("next=", f_start)) != string::npos) {
+						f_str = std::string(f_str.substr(f_end + 5, 64));
+						//printf("[load][next_=%s]\n", f_str.c_str());
+						bc->ksNext.SetBase16((char *)f_str.c_str());
+					}
+					if ((f_end = f_str.find("end=", f_start)) != string::npos) {
+						f_str = std::string(f_str.substr(f_end + 4, 64));
+						//printf("[load][end__=%s]\n", f_str.c_str());
+						bc->ksFinish.SetBase16((char *)f_str.c_str());
+					}
+				}
+			}
+			printf("[load] start=%s \n", bc->ksStart.GetBase16().c_str());
+			printf("[load]  next=%s \n", bc->ksNext.GetBase16().c_str());
+			printf("[load]   end=%s \n", bc->ksFinish.GetBase16().c_str());
+			fclose(fp);
+		}
+	}
 
 }
 // ------------------------------------------------------------------------------------------
@@ -408,7 +437,7 @@ void outputAdd(string outputFile, int addrType, string addr, string pAddr, strin
     fprintf(f, "Priv (WIF): p2wpkh:%s\n", pAddr.c_str());
     break;
   }
-  fprintf(f, "Priv (HEX): 0x%064s\n", pAddrHex.c_str());
+  fprintf(f, "Priv (HEX): 0x%s\n", pAddrHex.c_str());
 
   if (needToClose)
     fclose(f);
@@ -553,6 +582,7 @@ int main(int argc, char* argv[]) {
   Timer::Init();
   rseed((unsigned long)time(NULL));
 
+  printf("Init Secpk1\n");
   // Init SecpK1
   Secp256K1 *secp = new Secp256K1();
   secp->Init();
@@ -563,6 +593,7 @@ int main(int argc, char* argv[]) {
     printUsage();
   }
 
+  printf("Set Variables: %x\n", argc);
   int a = 1;
   bool gpuEnable = false;
   bool stop = false;
@@ -585,9 +616,11 @@ int main(int argc, char* argv[]) {
 
   string sessFile = "";//"_session.txt";
 
+  printf("Set maxKey\n");
   Int maxKey;
   maxKey.SetBase16("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364140");
 
+  printf("Set keyStart and MaxKey\n");
   BITCRACK_PARAM bitcrack, *bc;
   bc = &bitcrack;
   bc->ksStart.SetInt32(1);
@@ -595,6 +628,7 @@ int main(int argc, char* argv[]) {
   bc->ksFinish.Set(&maxKey);
   bc->shareM = 1;
   bc->shareN = 1;
+  printf("max and min set\n");
 
 
   while (a < argc) {
@@ -621,6 +655,7 @@ int main(int argc, char* argv[]) {
       secp->Check();
 
 #ifdef WITHGPU
+      printf("WITHGPU\n");
       GPUEngine g(gridSize[0],gpuId[0],maxFound,false);
       g.SetSearchMode(searchMode);
       g.Check(secp);
@@ -696,32 +731,33 @@ int main(int argc, char* argv[]) {
       a++;
       rekey = (uint64_t)getInt("rekey", argv[a]);
       a++;
-  }
-  else if (strcmp(argv[a], "--continue") == 0) {
-    a++;
-    sessFile = string(argv[a]);
-    a++;
-  }
-  else if (strcmp(argv[a], "--keyspace") == 0) {
-    a++;
-    getKeySpace(string(argv[a]), bc, maxKey);
-    bc->ksNext.Set(&bc->ksStart);
-    checkKeySpace(bc, maxKey);
-    a++;
-  }
-  else if (strcmp(argv[a], "--share") == 0) {
-    a++;
-    getShare(string(argv[a]), &bc->shareM, &bc->shareN);
-    a++;
-  }
-  else if (strcmp(argv[a], "--generator") == 0) {
-    a++;
-    int newgrpsize = 1024;
-    newgrpsize = getInt("newgrpsize", argv[a]);
-    GPUEngine::GenerateCode(secp, newgrpsize);
-    printf("\n[Created GPUGroup.h][NEW_GRP_SIZE=%i]\n",newgrpsize);
-    exit(0);
-    a++;
+	}
+	else if (strcmp(argv[a], "--continue") == 0) {
+		a++;
+		sessFile = string(argv[a]);
+		a++;
+	}
+	else if (strcmp(argv[a], "--keyspace") == 0) {
+		a++;
+    printf("doing keyspace\n");
+		getKeySpace(string(argv[a]), bc, maxKey);
+		bc->ksNext.Set(&bc->ksStart);
+		checkKeySpace(bc, maxKey);
+		a++;
+	}
+	else if (strcmp(argv[a], "--share") == 0) {
+		a++;
+		getShare(string(argv[a]), &bc->shareM, &bc->shareN);
+		a++;
+	}
+	else if (strcmp(argv[a], "--generator") == 0) {
+		a++;
+		int newgrpsize = 1024;
+		newgrpsize = getInt("newgrpsize", argv[a]);
+		GPUEngine::GenerateCode(secp, newgrpsize);
+		printf("\n[Created GPUGroup.h][NEW_GRP_SIZE=%i]\n",newgrpsize);
+		exit(0);
+		a++;
     } else if (a == argc - 1) {
       prefix.push_back(string(argv[a]));
       a++;
@@ -745,6 +781,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  printf("done with args\n");
   // Let one CPU core free per gpu is gpu is enabled
   // It will avoid to hang the system
   if( !tSpecified && nbCPUThread>1 && gpuEnable)
@@ -759,36 +796,36 @@ int main(int argc, char* argv[]) {
 
   // If a starting public key is specified, force the search mode according to the key
   if (!startPuKey.isZero()) {
-    searchMode = (startPubKeyCompressed) ? SEARCH_COMPRESSED : SEARCH_UNCOMPRESSED;
+	  searchMode = (startPubKeyCompressed) ? SEARCH_COMPRESSED : SEARCH_UNCOMPRESSED;
   }
 
 
   //Share to keyspace - apply before load progress 
 
   if(bc->shareN > 1){
-    //printf("[share][before] start=%064s\n", bc->ksStart.GetBase16().c_str());
-    //printf("[share][before]   end=%064s\n", bc->ksFinish.GetBase16().c_str());
+	  //printf("[share][before] start=%064s\n", bc->ksStart.GetBase16().c_str());
+	  //printf("[share][before]   end=%064s\n", bc->ksFinish.GetBase16().c_str());
 
-    Int shareRange;
-    shareRange.Sub(&bc->ksFinish,&bc->ksStart);
-    Int BNshareN;
-    BNshareN.SetInt32((uint32_t)bc->shareN);
-    Int share1Key;
-    share1Key.Set(&shareRange);
-    share1Key.Div(&BNshareN);
-    share1Key.AddOne();
-    for (int i = 1; i < bc->shareM; i++) {
-      bc->ksStart.Add(&share1Key);
-    }
-    bc->ksFinish.Set(&bc->ksStart);
-    bc->ksFinish.Add(&share1Key);
+	  Int shareRange;
+	  shareRange.Sub(&bc->ksFinish,&bc->ksStart);
+	  Int BNshareN;
+	  BNshareN.SetInt32((uint32_t)bc->shareN);
+	  Int share1Key;
+	  share1Key.Set(&shareRange);
+	  share1Key.Div(&BNshareN);
+	  share1Key.AddOne();
+	  for (int i = 1; i < bc->shareM; i++) {
+		  bc->ksStart.Add(&share1Key);
+	  }
+	  bc->ksFinish.Set(&bc->ksStart);
+	  bc->ksFinish.Add(&share1Key);
 
-    bc->ksNext.Set(&bc->ksStart);
+	  bc->ksNext.Set(&bc->ksStart);
 
-    printf("[share] %i/%i \n", bc->shareM, bc->shareN);
+	  printf("[share] %i/%i \n", bc->shareM, bc->shareN);
 
-    //printf("[share][after_] start=%064s\n", bc->ksStart.GetBase16().c_str());
-    //printf("[share][after_]   end=%064s\n", bc->ksFinish.GetBase16().c_str());
+	  //printf("[share][after_] start=%064s\n", bc->ksStart.GetBase16().c_str());
+	  //printf("[share][after_]   end=%064s\n", bc->ksFinish.GetBase16().c_str());
   }
   
 
