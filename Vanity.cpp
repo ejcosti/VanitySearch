@@ -1086,20 +1086,20 @@ void VanitySearch::checkAddr(int prefIdx, uint8_t *hash160, Int &key, int32_t in
 // ----------------------------------------------------------------------------
 
 #ifdef WIN64
-DWORD WINAPI _FindKey(LPVOID lpParam)
+DWORD WINAPI _FindKey(LPVOID lpParam) {
 #else
-void *_FindKey(void *lpParam) 
-#endif {
+void *_FindKey(void *lpParam) {
+#endif
   TH_PARAM *p = (TH_PARAM *)lpParam;
   p->obj->FindKeyCPU(p);
   return 0;
 }
 
 #ifdef WIN64
-DWORD WINAPI _FindKeyGPU(LPVOID lpParam)
+DWORD WINAPI _FindKeyGPU(LPVOID lpParam) {
 #else
-void *_FindKeyGPU(void *lpParam)
-#endif {
+void *_FindKeyGPU(void *lpParam) {
+#endif
   TH_PARAM *p = (TH_PARAM *)lpParam;
   p->obj->FindKeyGPU(p);
   return 0;
