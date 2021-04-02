@@ -262,7 +262,7 @@ VanitySearch::VanitySearch(Secp256K1 *secp, vector<std::string> &inputPrefixes,s
     } else {
       printf("Search: %d patterns [%s]\n", (int)inputPrefixes.size(), searchInfo.c_str());
     }
-   
+
     patternFound = (bool *)malloc(inputPrefixes.size()*sizeof(bool));
     memset(patternFound,0, inputPrefixes.size() * sizeof(bool));
 
@@ -378,7 +378,7 @@ bool VanitySearch::initPrefix(std::string &prefix,PREFIX_ITEM *it) {
   }
 
   int aType = -1;
-  
+
 
   switch (prefix.data()[0]) {
   case '1':
@@ -824,28 +824,7 @@ void VanitySearch::output(string addr,string pAddr,string pAddrHex) {
     }
   }
 
-  fprintf(f, "\nPub Addr: %s\n", addr.c_str());
-
-  if (startPubKeySpecified) {
-
-    fprintf(f, "PartialPriv: %s\n", pAddr.c_str());
-
-  } else {
-
-    switch (searchType) {
-    case P2PKH:
-      fprintf(f, "Priv (WIF): p2pkh:%s\n", pAddr.c_str());
-      break;
-    case P2SH:
-      fprintf(f, "Priv (WIF): p2wpkh-p2sh:%s\n", pAddr.c_str());
-      break;
-    case BECH32:
-      fprintf(f, "Priv (WIF): p2wpkh:%s\n", pAddr.c_str());
-      break;
-    }
-    fprintf(f, "Priv (HEX): 0x%064s\n", pAddrHex.c_str());
-
-  }
+  fprintf(f, "%s, %s, %s\n", addr.c_str(), pAddr.c_str(), pAddrHex.c_str());
 
   if(needToClose)
     fclose(f);
@@ -1107,20 +1086,20 @@ void VanitySearch::checkAddr(int prefIdx, uint8_t *hash160, Int &key, int32_t in
 // ----------------------------------------------------------------------------
 
 #ifdef WIN64
-DWORD WINAPI _FindKey(LPVOID lpParam) {
+DWORD WINAPI _FindKey(LPVOID lpParam)
 #else
-void *_FindKey(void *lpParam) {
-#endif
+void *_FindKey(void *lpParam) 
+#endif {
   TH_PARAM *p = (TH_PARAM *)lpParam;
   p->obj->FindKeyCPU(p);
   return 0;
 }
 
 #ifdef WIN64
-DWORD WINAPI _FindKeyGPU(LPVOID lpParam) {
+DWORD WINAPI _FindKeyGPU(LPVOID lpParam)
 #else
-void *_FindKeyGPU(void *lpParam) {
-#endif
+void *_FindKeyGPU(void *lpParam)
+#endif {
   TH_PARAM *p = (TH_PARAM *)lpParam;
   p->obj->FindKeyGPU(p);
   return 0;
@@ -1408,9 +1387,9 @@ void VanitySearch::getCPUStartingKey(int thId,Int& key,Point& startPoint, uint64
   THnextKey.Set(&IncrStartKey);
   IncrStartKey.Add(*tasksize);
 
-  //printf("\n[CPU#%u][rekey][tasksize#%llu] \n", thId, *tasksize);
-  //printf("[CPU#%u][startKey__now] 0x%064s + 0x%llX = \n", thId, THnextKey.GetBase16().c_str(), *tasksize);
-  //printf("[CPU#%u][startKey_next] 0x%064s \n", thId, IncrStartKey.GetBase16().c_str());
+  printf("\n[CPU#%u][rekey][tasksize#%llu] \n", thId, *tasksize);
+  printf("[CPU#%u][startKey__now] 0x%s + 0x%llX = \n", thId, THnextKey.GetBase16().c_str(), *tasksize);
+  printf("[CPU#%u][startKey_next] 0x%s \n", thId, IncrStartKey.GetBase16().c_str());
 #ifdef WIN64
   ReleaseMutex(ghMutex_IncrStartKey);
 #else
